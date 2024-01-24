@@ -1,6 +1,6 @@
 ﻿namespace WebCalendarApp.DataObjects.Calendar;
 
-public sealed class DateTimeRange
+public struct DateTimeRange
 {
     public DateTime Start { get; set; }
     public DateTime End { get; set; }
