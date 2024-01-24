@@ -1,5 +1,4 @@
-﻿using Azure.Identity;
-using Microsoft.Graph;
+﻿using Microsoft.Graph;
 using WebCalendarApp.Services.Extensions;
 using System.Diagnostics;
 using WebCalendarApp.Services.Interfaces.Calendar;
@@ -15,30 +14,13 @@ public class GraphCalendarService : ICalendarService
     private readonly GraphServiceClient _graphClient;
     private readonly string? _devModeEmail;
 
-    public GraphCalendarService(IConfiguration configuration, ILogger<GraphCalendarService> logger)
+    public GraphCalendarService(IConfiguration configuration, GraphServiceClient graphClient, ILogger<GraphCalendarService> logger)
     {
         _configuration = configuration;
+        _graphClient = graphClient;
         _logger = logger;
-        _graphClient = GetGraphClient();
         var devMode = Convert.ToBoolean(_configuration["testPortal:devMode"]);
         _devModeEmail = devMode ? _configuration["testPortal:developmentEmailAddress"] : null;
-    }
-
-    private GraphServiceClient GetGraphClient()
-    {
-        var clientId = _configuration.GetValue<string>("testPortal:Azure:ClientId");
-        var clientSecret = _configuration.GetValue<string>("testPortal:Azure:ClientSecret");
-        var tenantId = _configuration.GetValue<string>("testPortal:Azure:TenantId");
-        var scopes = new[] { _configuration.GetValue<string>("testPortal:Azure:GraphAPI") };
-
-        var options = new TokenCredentialOptions
-        {
-            AuthorityHost = AzureAuthorityHosts.AzurePublicCloud
-        };
-
-        var clientSecretCredential = new ClientSecretCredential(tenantId, clientId, clientSecret, options);
-
-        return new GraphServiceClient(clientSecretCredential, scopes);
     }
 
     public async Task<string> CreateAppointmentAsync(string email, Event appointment, CancellationToken cancellationToken)
@@ -168,14 +150,12 @@ public class GraphCalendarService : ICalendarService
 
         _logger.LogDebug("Elapsed calculating all users free slots: {seconds}", watcher.Elapsed.TotalSeconds);
 
-        var result = new TimeSlotsResponse
+        return new TimeSlotsResponse
         {
             Appointments = appointments.ToHashSet(),
             Slots30Dates = new SortedSet<DateTime>(slots30Dates),
             Slots60Dates = new SortedSet<DateTime>(slots60Dates)
         };
-
-        return result;
     }
 
     private static IDictionary<string, List<TimeAppointment>> GetAllUsersAppointments(CalendarSchedule schedule)
@@ -226,10 +206,11 @@ public class GraphCalendarService : ICalendarService
             .Header("Prefer", $"outlook.timezone=\"{UTCName}\"")
             .PostAsync(cancellationToken);
     
-    private static TimeSlotsResponse CalculateFreeSlots(DateTime startDateUtc, DateTime endDateUtc, ICollection<TimeAppointment> appointments)
+    private static TimeSlotsResponse CalculateFreeSlots(DateTime startDateUtc, DateTime endDateUtc,
+                                                        ICollection<TimeAppointment> appointments)
     {
-        var slots30DateArray = new SortedSet<DateTime>();
-        var slots60DateArray = new SortedSet<DateTime>();
+        var slots30Mins = new SortedSet<DateTime>();
+        var slots60Mins = new SortedSet<DateTime>();
 
         var slotStartTime = startDateUtc;
         DateTime slot30EndTime;
@@ -244,23 +225,22 @@ public class GraphCalendarService : ICalendarService
 
             if (IsAvailableTimeSlot(appointments, slotStartTime, slot30EndTime))
             {
-                slots30DateArray.Add(slotStartTime);
+                slots30Mins.Add(slotStartTime);
 
                 if (IsAvailableTimeSlot(appointments, slotStartTime, slot60EndTime) &&
                     (slot60EndTime <= endDateUtc))
                 {
-                    slots60DateArray.Add(slotStartTime);
+                    slots60Mins.Add(slotStartTime);
                 }
             }
-
             slotStartTime = slotStartTime.AddMinutes(slotOffsetMins);
 
         } while (slotStartTime <= endDateUtc && slot30EndTime <= endDateUtc);
 
         return new TimeSlotsResponse
         {
-            Slots30Dates = slots30DateArray,
-            Slots60Dates = slots60DateArray,
+            Slots30Dates = slots30Mins,
+            Slots60Dates = slots60Mins,
             Appointments = appointments.ToHashSet()
         };
     }
